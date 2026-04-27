@@ -1,0 +1,48 @@
+# ---- Node / build output ----
+node_modules
+dist
+dist-ssr
+*.tsbuildinfo
+
+# ---- Environment files ----
+# The real .env holds Firebase credentials and must never be committed.
+# Only .env.example (with placeholder values) is tracked.
+.env
+.env.local
+.env.*.local
+*.local
+
+# ---- Firebase ----
+# .firebaserc maps local aliases to real project IDs — treat as secret
+# for public repos so the project ID is not leaked.
+.firebaserc
+# Firebase CLI cache / emulator state
+.firebase/
+# Service account key exports (any of these patterns from the Firebase
+# Admin SDK / Google Cloud Console). Never commit any of these.
+serviceAccountKey*.json
+*-adminsdk-*.json
+*-service-account*.json
+.runtimeconfig.json
+
+# ---- Editor / OS ----
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+
+# ---- Claude Code ----
+# Per-user local settings (permission allowlist, etc.). The shared
+# .claude/settings.json (if any) may still be committed.
+.claude/settings.local.json
+.claude/worktrees/*
+.claude/worktrees/vibrant-bassi-b44ec6
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+

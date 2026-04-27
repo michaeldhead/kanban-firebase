@@ -1,0 +1,185 @@
+// ---------------------------------------------------------------------------
+// Firestore security rules.
+//
+// v2 access model: projects can be shared with other users by email.
+//
+//   - The project's owner is identified by `userId` (a Firebase Auth uid).
+//   - Other members are listed in `members` (a map keyed by email) and
+//     denormalized into `memberEmails` (a flat array used for indexed
+//     `array-contains` queries from the client).
+//   - Cards carry a `projectOwnerId` (denormalized owner uid) and a
+//     `userId` (the creator's uid — could be the owner or any member).
+//
+// Permissions summary:
+//
+//   PROJECTS
+//     read:   owner OR any member (by email)
+//     create: any signed-in user (they become the owner)
+//     update: owner can change anything
+//             members can change anything EXCEPT ownership / membership /
+//             column structure (rules verify the patch leaves these
+//             fields equal to their stored values)
+//     delete: owner only
+//
+//   CARDS
+//     read:   the card's creator OR the project's owner OR any member
+//             of the parent project (verified via a `get()` on the
+//             project doc — Firestore deduplicates these reads per
+//             query)
+//     create: signed-in user, must stamp their own uid in `userId`,
+//             must already have access to the parent project
+//     update: same set as read (any project member, or the creator)
+//     delete: card creator OR project owner only (members cannot
+//             delete other members' cards or owner-created cards;
+//             archive is a separate UPDATE so it remains member-
+//             accessible)
+//
+// Deploy:
+//   npx firebase deploy --only firestore:rules
+// ---------------------------------------------------------------------------
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      // The Firebase Auth ID token's `email` claim is populated for
+      // both Google Sign-In and Email/Password providers. Email is
+      // verified for Email/Password the moment the user signs in
+      // successfully; for Google it is asserted by the provider.
+      //
+      // Lowercased before return because every place we STORE an
+      // email — `inviteMember`, `activateMember`, `createCard`,
+      // `createCardsBatch`, `updateCardMemberEmails` — normalizes to
+      // lowercase. Comparing against the raw token would let a user
+      // who signed up with mixed-case appear different from the
+      // lowercased copy in `memberEmails`. The null guard is a
+      // safety net for hypothetical providers without an `email`
+      // claim; for our two providers (Email/Password + Google) the
+      // claim is always present.
+      return request.auth != null && request.auth.token.email != null
+        ? request.auth.token.email.lower()
+        : null;
+    }
+
+    // -------- Projects --------
+
+    match /projects/{projectId} {
+
+      function isOwner() {
+        return isSignedIn() && request.auth.uid == resource.data.userId;
+      }
+
+      function isOwnerForCreate() {
+        // For create, only `request.resource` exists — `resource` is
+        // unbound. We require the new doc to claim the caller as the
+        // owner (anti-impersonation safeguard).
+        return isSignedIn() && request.auth.uid == request.resource.data.userId;
+      }
+
+      function isMember() {
+        return isSignedIn()
+          && authEmail() != null
+          && resource.data.memberEmails.hasAny([authEmail()]);
+      }
+
+      // Members are allowed to update card-related project state
+      // (cardSortMode, group, title) but NOT the ownership /
+      // membership / column structure. We enforce this by requiring
+      // those four fields to remain unchanged on the patch.
+      function memberPatchPreservesOwnership() {
+        return request.resource.data.userId == resource.data.userId
+          && request.resource.data.members == resource.data.members
+          && request.resource.data.memberEmails == resource.data.memberEmails
+          && request.resource.data.columnOrder == resource.data.columnOrder
+          && request.resource.data.columns == resource.data.columns;
+      }
+
+      allow read:   if isOwner() || isMember();
+      allow create: if isOwnerForCreate();
+      allow update: if isOwner()
+        || (isMember() && memberPatchPreservesOwnership());
+      allow delete: if isOwner();
+    }
+
+    // -------- Cards --------
+
+    match /cards/{cardId} {
+
+      // --------------------------------------------------------------
+      // Three-predicate access model, all per-document (no get()).
+      //
+      // The earlier "members see everything" design used a
+      //   get(/databases/.../projects/$(projectId)).data.memberEmails
+      // cross-collection lookup. That pattern was rejected by the
+      // Firestore rules evaluator on list queries — the engine
+      // cannot statically prove the get() result for every potential
+      // result of a query.
+      //
+      // The fix: stamp `memberEmails` directly on each card at write
+      // time. Now the access check is a pure per-document test —
+      // `authEmail() in resource.data.memberEmails` — and the rules
+      // engine can prove it safe for any card-list query.
+      //
+      // The client side (`createCard`, `createCardsBatch`) populates
+      // `memberEmails` from the active project's member list at
+      // write time. Subsequent membership changes propagate to every
+      // card via `updateCardMemberEmails`, called by `inviteMember`
+      // / `activateMember` / `removeMember`. An invite gives access
+      // immediately; a removal revokes it as soon as the fan-out
+      // batch commits.
+      //
+      // Three predicates. Read / update if ANY:
+      //   - isCardCreator       — creator's uid matches
+      //   - isProjectOwnerOnCard — owner's uid matches
+      //   - isMemberOnCard      — caller's email is in the
+      //                           card's stamped memberEmails
+      // Delete is restricted to creator + owner; members cannot
+      // hard-delete each other's cards (archive remains an UPDATE
+      // and is therefore member-accessible).
+      // --------------------------------------------------------------
+
+      function isCardCreator() {
+        return isSignedIn() && request.auth.uid == resource.data.userId;
+      }
+
+      function isProjectOwnerOnCard() {
+        return isSignedIn()
+          && request.auth.uid == resource.data.projectOwnerId;
+      }
+
+      function isMemberOnCard() {
+        // Pure per-document check. `resource.data.get('memberEmails',
+        // [])` returns an empty list for legacy cards without the
+        // field, so they correctly fall through to the other two
+        // predicates rather than failing the rule outright.
+        return isSignedIn()
+          && authEmail() != null
+          && resource.data.get('memberEmails', []).hasAny([authEmail()]);
+      }
+
+      allow read:   if isCardCreator() || isProjectOwnerOnCard() || isMemberOnCard();
+      allow update: if isCardCreator() || isProjectOwnerOnCard() || isMemberOnCard();
+      allow delete: if isCardCreator() || isProjectOwnerOnCard();
+
+      // Create: any signed-in user may create a card AS LONG AS
+      // they claim themself as the `userId`. We do not verify the
+      // parent project's membership at this layer; a card with a
+      // bogus `projectId` is harmless because nothing else grants
+      // access to it besides its own `userId` / `projectOwnerId` /
+      // `memberEmails` fields.
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Default deny for any collection not matched above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

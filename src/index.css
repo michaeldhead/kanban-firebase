@@ -1,0 +1,110 @@
+/* ---------------------------------------------------------------------------
+ * Global styles.
+ *
+ * Tailwind provides the utility classes used throughout the component tree.
+ * On top of that we define a set of CSS custom properties ("--kb-*") that
+ * act as design tokens for the future theming system: themes will override
+ * these variables and the components read them via the `kb-*` colors
+ * declared in tailwind.config.js. The values here are the Default Light
+ * theme, used until the theme switcher is wired up.
+ * ---------------------------------------------------------------------------
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Sidebar chrome (dark for the default theme to provide contrast with the
+     light board area on the right). */
+  --kb-sidebar-bg: #1f1b2e;
+  --kb-sidebar-text: #e5e7eb;
+  --kb-sidebar-accent: #a78bfa;
+
+  /* Board / card surfaces. */
+  --kb-board-bg: #f7f7fb;
+  --kb-card-bg: #ffffff;
+  --kb-card-border: #e5e7eb;
+  --kb-column-header: #f3f4f6;
+
+  /* Primary accent (used by the round "add card" button, etc.). */
+  --kb-accent-primary: #7c3aed;
+  --kb-accent-text: #ffffff;
+
+  /* Dialog / card text scale. Used by modal content, board chrome,
+     and anywhere text needs to follow the theme. Themes.ts overrides
+     these for dark mode. */
+  --kb-text-primary: #0f172a;
+  --kb-text-secondary: #475569;
+  --kb-text-muted: #94a3b8;
+
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--kb-board-bg);
+  color: #111827;
+}
+
+/* Thinner scrollbars on the board and sidebar to keep the UI calm.
+   The class is applied on scroll containers that opt in. */
+.kb-scroll::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.kb-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 999px;
+}
+.kb-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Themed slim scrollbar shared by the three board-view scroll
+   surfaces:
+     1. FilterBar         — horizontal
+     2. Board columns     — horizontal
+     3. Column card list  — vertical
+   The thumb color uses `--kb-text-muted` at 50% opacity (75% on
+   hover) instead of `--kb-card-border` because some light themes
+   define `--kb-card-border` as a near-white tint that disappears
+   against the equally-light board surface. `--kb-text-muted` is a
+   readable slate-400 in every theme + mode, so a half-opacity
+   build of it gives a thumb that is visibly darker than any board
+   background without becoming harsh on the dark variants.
+   `color-mix(in srgb, …, transparent)` is the cross-browser way to
+   get a translucent build of a CSS custom property — alpha cannot
+   be applied to a custom property value directly.
+   Both `height` and `width` are set so the class works on
+   horizontal AND vertical scroll containers; browsers honor only
+   the axis that exists on a given element. */
+.kb-scroll-thin {
+  scrollbar-width: thin;                                                          /* Firefox */
+  scrollbar-color: color-mix(in srgb, var(--kb-text-muted) 50%, transparent)
+    transparent;                                                                  /* Firefox */
+}
+.kb-scroll-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.kb-scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kb-scroll-thin::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--kb-text-muted) 50%, transparent);
+  border-radius: 999px;
+}
+.kb-scroll-thin::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--kb-text-muted) 75%, transparent);
+}
